@@ -105,12 +105,14 @@ ENV TIKTOKEN_CACHE_DIR=/app/api/.tiktoken_cache
 RUN python -c "import tiktoken; tiktoken.encoding_for_model('gpt2')" \
     && chown -R dify:dify ${TIKTOKEN_CACHE_DIR}
 
-# Entrypoint first (context=repo root: api/docker/entrypoint.sh -> /api/docker/entrypoint.sh)
+# Create /api/docker before any copy; entrypoint comes from api/ copy then moved to /api/docker
 RUN mkdir -p /api/docker
-COPY --chown=dify:dify --chmod=755 api/docker/entrypoint.sh /api/docker/entrypoint.sh
 
 # Copy source code (api/ contents into /app/api/)
 COPY --chown=dify:dify api/ /app/api/
+
+# Place entrypoint at /api/docker/entrypoint.sh (same path as startCommand/ENTRYPOINT)
+RUN cp /app/api/docker/entrypoint.sh /api/docker/entrypoint.sh && chmod 755 /api/docker/entrypoint.sh
 
 ARG COMMIT_SHA
 ENV COMMIT_SHA=${COMMIT_SHA}
