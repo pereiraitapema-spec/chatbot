@@ -108,9 +108,9 @@ RUN python -c "import tiktoken; tiktoken.encoding_for_model('gpt2')" \
 # Copy source code
 COPY --chown=dify:dify . /app/api/
 
-# Prepare entrypoint script
-COPY --chown=dify:dify --chmod=755 api/docker/entrypoint.sh /entrypoint.sh
-
+# Prepare entrypoint script (path must match startCommand /api/docker/entrypoint.sh when context is repo root)
+RUN mkdir -p /api/docker
+COPY --chown=dify:dify --chmod=755 api/docker/entrypoint.sh /api/docker/entrypoint.sh
 
 ARG COMMIT_SHA
 ENV COMMIT_SHA=${COMMIT_SHA}
@@ -118,4 +118,4 @@ ENV NLTK_DATA=/usr/local/share/nltk_data
 
 USER dify
 
-ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
+ENTRYPOINT ["/bin/bash", "/api/docker/entrypoint.sh"]

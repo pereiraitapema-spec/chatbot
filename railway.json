@@ -6,7 +6,7 @@
       "context": "."
     },
     "deploy": {
-      "startCommand": "/entrypoint.sh",
+      "startCommand": "/api/docker/entrypoint.sh",
       "port": 5001,
       "healthcheckPath": "/health",
       "healthcheckTimeout": 300,
