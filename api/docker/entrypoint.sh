@@ -8,6 +8,40 @@ export LANG=${LANG:-C.UTF-8}
 export LC_ALL=${LC_ALL:-C.UTF-8}
 export PYTHONIOENCODING=${PYTHONIOENCODING:-utf-8}
 
+# Convert DATABASE_URL to individual DB variables if DATABASE_URL is provided and individual vars are not set
+# This is useful for Railway and other platforms that provide DATABASE_URL
+if [[ -n "${DATABASE_URL}" ]] && [[ -z "${DB_HOST}" ]]; then
+  # Parse DATABASE_URL format: postgresql://user:password@host:port/database
+  # or: postgres://user:password@host:port/database
+  # Use Python to properly handle URL-encoded passwords and special characters
+  export DB_TYPE=${DB_TYPE:-postgresql}
+  eval $(python3 -c "
+import os
+from urllib.parse import urlparse, unquote
+
+db_url = os.environ.get('DATABASE_URL', '')
+if db_url:
+    parsed = urlparse(db_url)
+    username = unquote(parsed.username or '')
+    password = unquote(parsed.password or '')
+    hostname = parsed.hostname or ''
+    port = parsed.port or 5432
+    database = unquote(parsed.path.lstrip('/') or '')
+    
+    print(f'export DB_USERNAME=\"{username}\"')
+    print(f'export DB_PASSWORD=\"{password}\"')
+    print(f'export DB_HOST=\"{hostname}\"')
+    print(f'export DB_PORT=\"{port}\"')
+    print(f'export DB_DATABASE=\"{database}\"')
+" 2>/dev/null)
+  
+  if [[ -n "${DB_HOST}" ]]; then
+    echo "Converted DATABASE_URL to individual DB variables"
+  else
+    echo "Warning: Failed to parse DATABASE_URL, ensure DB_HOST, DB_USERNAME, DB_PASSWORD, DB_PORT, and DB_DATABASE are set"
+  fi
+fi
+
 if [[ "${MIGRATION_ENABLED}" == "true" ]]; then
   echo "Running migrations"
   flask upgrade-db
