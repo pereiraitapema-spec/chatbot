@@ -8,39 +8,123 @@ export LANG=${LANG:-C.UTF-8}
 export LC_ALL=${LC_ALL:-C.UTF-8}
 export PYTHONIOENCODING=${PYTHONIOENCODING:-utf-8}
 
-# Convert DATABASE_URL to individual DB variables if DATABASE_URL is provided and individual vars are not set
-# This is useful for Railway and other platforms that provide DATABASE_URL
+# Railway / PaaS: prefer PORT from platform, bind to all interfaces
+export DIFY_BIND_ADDRESS="${DIFY_BIND_ADDRESS:-0.0.0.0}"
+export DIFY_PORT="${PORT:-${DIFY_PORT:-5001}}"
+
+# Parse DATABASE_URL into DB_* variables when set and DB_HOST is not (e.g. Railway Postgres)
 if [[ -n "${DATABASE_URL}" ]] && [[ -z "${DB_HOST}" ]]; then
-  # Parse DATABASE_URL format: postgresql://user:password@host:port/database
-  # or: postgres://user:password@host:port/database
-  # Use Python to properly handle URL-encoded passwords and special characters
-  export DB_TYPE=${DB_TYPE:-postgresql}
-  eval $(python3 -c "
+  python3 << 'PYDB'
 import os
 from urllib.parse import urlparse, unquote
-
-db_url = os.environ.get('DATABASE_URL', '')
+def esc(s):
+    return repr(str(s))
+db_url = os.environ.get("DATABASE_URL", "")
 if db_url:
     parsed = urlparse(db_url)
-    username = unquote(parsed.username or '')
-    password = unquote(parsed.password or '')
-    hostname = parsed.hostname or ''
-    port = parsed.port or 5432
-    database = unquote(parsed.path.lstrip('/') or '')
-    
-    print(f'export DB_USERNAME=\"{username}\"')
-    print(f'export DB_PASSWORD=\"{password}\"')
-    print(f'export DB_HOST=\"{hostname}\"')
-    print(f'export DB_PORT=\"{port}\"')
-    print(f'export DB_DATABASE=\"{database}\"')
-" 2>/dev/null)
-  
-  if [[ -n "${DB_HOST}" ]]; then
-    echo "Converted DATABASE_URL to individual DB variables"
-  else
-    echo "Warning: Failed to parse DATABASE_URL, ensure DB_HOST, DB_USERNAME, DB_PASSWORD, DB_PORT, and DB_DATABASE are set"
+    u = unquote(parsed.username or "")
+    p = unquote(parsed.password or "")
+    h = parsed.hostname or ""
+    pt = parsed.port or 5432
+    d = unquote((parsed.path or "/").strip("/") or "")
+    with open("/tmp/railway_db_env", "w") as f:
+        f.write("export DB_TYPE=postgresql\n")
+        f.write("export DB_USERNAME=" + esc(u) + "\n")
+        f.write("export DB_PASSWORD=" + esc(p) + "\n")
+        f.write("export DB_HOST=" + esc(h) + "\n")
+        f.write("export DB_PORT=" + str(pt) + "\n")
+        f.write("export DB_DATABASE=" + esc(d) + "\n")
+PYDB
+  if [[ -f /tmp/railway_db_env ]]; then
+    set -a
+    . /tmp/railway_db_env
+    set +a
+    rm -f /tmp/railway_db_env
+    echo "Converted DATABASE_URL to DB_* variables"
   fi
 fi
+
+# Parse REDIS_URL into REDIS_* and CELERY_BROKER_URL when set and CELERY_BROKER_URL is not (e.g. Railway Redis)
+if [[ -n "${REDIS_URL}" ]] && [[ -z "${CELERY_BROKER_URL}" ]]; then
+  python3 << 'PYREDIS'
+import os
+from urllib.parse import urlparse, unquote
+def esc(s):
+    return repr(str(s))
+r = os.environ.get("REDIS_URL", "")
+if r:
+    parsed = urlparse(r)
+    u = unquote(parsed.username or "")
+    p = unquote(parsed.password or "")
+    h = parsed.hostname or ""
+    pt = parsed.port or 6379
+    db = (parsed.path or "/0").strip("/") or "0"
+    try:
+        dbn = int(db)
+    except ValueError:
+        dbn = 0
+    scheme = "rediss" if parsed.scheme == "rediss" else "redis"
+    auth = (":" + p) if p else ""
+    at = (u + auth + "@") if (u or auth) else ""
+    broker_url = scheme + "://" + at + h + ":" + str(pt) + "/1"
+    with open("/tmp/railway_redis_env", "w") as f:
+        f.write("export REDIS_HOST=" + esc(h) + "\n")
+        f.write("export REDIS_PORT=" + str(pt) + "\n")
+        f.write("export REDIS_PASSWORD=" + esc(p) + "\n")
+        f.write("export REDIS_USERNAME=" + esc(u) + "\n")
+        f.write("export REDIS_DB=" + str(dbn) + "\n")
+        f.write("export REDIS_USE_SSL=" + ("true" if scheme == "rediss" else "false") + "\n")
+        f.write("export CELERY_BROKER_URL=" + esc(broker_url) + "\n")
+PYREDIS
+  if [[ -f /tmp/railway_redis_env ]]; then
+    set -a
+    . /tmp/railway_redis_env
+    set +a
+    rm -f /tmp/railway_redis_env
+    echo "Converted REDIS_URL to REDIS_* and CELERY_BROKER_URL"
+  fi
+fi
+
+# Improve connection reliability in cloud (e.g. Railway)
+export SQLALCHEMY_POOL_PRE_PING="${SQLALCHEMY_POOL_PRE_PING:-true}"
+export SQLALCHEMY_POOL_TIMEOUT="${SQLALCHEMY_POOL_TIMEOUT:-60}"
+
+# Wait for database to be reachable before migrations/start (retry loop)
+_wait_for_db() {
+  [[ -z "${DB_HOST}" ]] && return 0
+  local max_attempts="${DB_WAIT_ATTEMPTS:-30}"
+  local attempt=1
+  while [ "$attempt" -le "$max_attempts" ]; do
+    if python3 -c "
+import os
+import sys
+try:
+    import psycopg2
+    c = psycopg2.connect(
+        host=os.environ.get('DB_HOST'),
+        port=int(os.environ.get('DB_PORT', 5432)),
+        user=os.environ.get('DB_USERNAME'),
+        password=os.environ.get('DB_PASSWORD'),
+        dbname=os.environ.get('DB_DATABASE'),
+        connect_timeout=5
+    )
+    c.close()
+    sys.exit(0)
+except Exception as e:
+    print(e, file=sys.stderr)
+    sys.exit(1)
+" 2>/dev/null; then
+      echo "Database is ready."
+      return 0
+    fi
+    echo "Waiting for database (attempt $attempt/$max_attempts)..."
+    sleep 2
+    attempt=$((attempt + 1))
+  done
+  echo "Database wait timeout." >&2
+  return 1
+}
+_wait_for_db
 
 if [[ "${MIGRATION_ENABLED}" == "true" ]]; then
   echo "Running migrations"
