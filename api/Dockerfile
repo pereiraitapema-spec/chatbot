@@ -21,8 +21,8 @@ RUN apt-get update \
           # for building gmpy2
           libmpfr-dev libmpc-dev
 
-# Install Python dependencies
-COPY pyproject.toml uv.lock ./
+# Install Python dependencies (context=repo root)
+COPY api/pyproject.toml api/uv.lock ./
 RUN uv sync --locked --no-dev
 
 # production stage
@@ -105,12 +105,12 @@ ENV TIKTOKEN_CACHE_DIR=/app/api/.tiktoken_cache
 RUN python -c "import tiktoken; tiktoken.encoding_for_model('gpt2')" \
     && chown -R dify:dify ${TIKTOKEN_CACHE_DIR}
 
-# Copy source code
-COPY --chown=dify:dify . /app/api/
-
-# Prepare entrypoint script (path must match startCommand /api/docker/entrypoint.sh when context is repo root)
+# Entrypoint first (context=repo root: api/docker/entrypoint.sh -> /api/docker/entrypoint.sh)
 RUN mkdir -p /api/docker
 COPY --chown=dify:dify --chmod=755 api/docker/entrypoint.sh /api/docker/entrypoint.sh
+
+# Copy source code (api/ contents into /app/api/)
+COPY --chown=dify:dify api/ /app/api/
 
 ARG COMMIT_SHA
 ENV COMMIT_SHA=${COMMIT_SHA}
