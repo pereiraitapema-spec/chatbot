@@ -3,7 +3,7 @@
   "build": {
     "builder": "DOCKERFILE",
     "dockerfilePath": "api/Dockerfile",
-    "context": "."
+    "context": "api"
   },
   "deploy": {
     "port": 5001,
