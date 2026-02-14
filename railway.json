@@ -2,12 +2,13 @@
   "$schema": "https://railway.app/standard-schema.json",
   "build": {
     "builder": "DOCKERFILE",
-    "dockerfilePath": "Dockerfile",
+    "dockerfilePath": "api/Dockerfile",
     "context": "."
   },
   "deploy": {
     "port": 5001,
     "healthcheckPath": "/health",
-    "healthcheckTimeout": 300
+    "healthcheckTimeout": 300,
+    "restartPolicyType": "ON_FAILURE"
   }
 }
