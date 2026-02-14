@@ -3,13 +3,11 @@
   "build": {
     "builder": "DOCKERFILE",
     "dockerfilePath": "Dockerfile",
-    "context": "api"
+    "context": "."
   },
   "deploy": {
-    "startCommand": "/entrypoint.sh",
     "port": 5001,
     "healthcheckPath": "/health",
-    "healthcheckTimeout": 300,
-    "restartPolicyType": "ON_FAILURE"
+    "healthcheckTimeout": 300
   }
 }
